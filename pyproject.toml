@@ -1,0 +1,16 @@
+[project]
+name = "kensei"
+version = "0.1.0"
+description = "Production AutoML Platform: CSV to API in 47 seconds"
+authors = [
+    {name = "Yash", email = "yashnema52@gmail.com"},
+]
+readme = "README.md"
+requires-python = ">=3.9"
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.isort]
+profile = "black"
