@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from celery import shared_task
-
 from backend.api import crud
 from backend.api.deps import SessionLocal
 from backend.core.logger import logger
@@ -19,7 +17,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-@shared_task(bind=True, name="kensei.train_job")
+@celery_app.task(bind=True, name="kensei.train_job")
 def train_job(self, job_id: int) -> Dict[str, Any]:
     db = SessionLocal()
     try:
@@ -124,6 +122,3 @@ def train_job(self, job_id: int) -> Dict[str, Any]:
         raise
     finally:
         db.close()
-
-
-celery_app.tasks.register(train_job)
