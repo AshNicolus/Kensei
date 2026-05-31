@@ -136,6 +136,25 @@ def _fit_final(
     )
 
 
+def smart_defaults(rows: int, cols: int, task_type: TaskType) -> dict:
+    """Pick reasonable Optuna trials / CV / algos based on dataset shape."""
+    if rows < 200:
+        trials, cv_folds = 8, 2
+    elif rows < 2000:
+        trials, cv_folds = 15, 3
+    elif rows < 20000:
+        trials, cv_folds = 20, 3
+    else:
+        trials, cv_folds = 10, 3
+    if rows > 50000:
+        algos = ["lightgbm"] if cols < 200 else ["lightgbm", "xgboost"]
+    elif rows > 10000:
+        algos = ["random_forest", "xgboost", "lightgbm"]
+    else:
+        algos = None  # full sweep
+    return {"trials": trials, "cv_folds": cv_folds, "algorithms": algos}
+
+
 def run_training(
     df,
     target: str,
@@ -153,6 +172,14 @@ def run_training(
     preprocessor = pp.build_preprocessor(prepared.numeric_cols, prepared.categorical_cols)
 
     stratify = prepared.y if prepared.task_type == TaskType.CLASSIFICATION else None
+    # Guard: train_test_split with too few rows produces opaque errors
+    if prepared.X.shape[0] < max(int(1 / max(test_size, 0.01)), cv_folds + 1):
+        from backend.forge.preprocess import DataPreparationError
+
+        raise DataPreparationError(
+            f"Only {prepared.X.shape[0]} usable rows after preprocessing — "
+            f"need more for a {test_size:.0%} train/test split with {cv_folds}-fold CV."
+        )
     X_train, X_test, y_train, y_test = train_test_split(
         prepared.X, prepared.y, test_size=test_size, random_state=seed, stratify=stratify
     )

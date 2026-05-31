@@ -134,6 +134,27 @@ def list_deployments(token: str) -> List[Dict[str, Any]]:
     ) or []
 
 
+def analyze_dataset(token: str, dataset_id: int) -> Dict[str, Any]:
+    return _raise_for(
+        requests.get(
+            _url(f"/api/autopilot/analyze/{dataset_id}"),
+            headers=_bearer(token),
+            timeout=TIMEOUT,
+        )
+    )
+
+
+def autopilot_train(token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _raise_for(
+        requests.post(
+            _url("/api/autopilot/train"),
+            json=payload,
+            headers=_bearer(token),
+            timeout=600,
+        )
+    )
+
+
 def predict(slug: str, rows: List[Dict[str, Any]], api_key: Optional[str] = None) -> Dict[str, Any]:
     headers: Dict[str, str] = {}
     if api_key:

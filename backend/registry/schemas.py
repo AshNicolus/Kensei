@@ -143,3 +143,47 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class ColumnAnalysis(BaseModel):
+    name: str
+    dtype: str
+    missing: int
+    missing_pct: float
+    unique: int
+    sample_values: List[Any] = Field(default_factory=list)
+    id_like: bool = False
+    constant: bool = False
+
+
+class DatasetAnalysis(BaseModel):
+    dataset_id: int
+    name: str
+    rows: int
+    columns_count: int
+    columns: List[ColumnAnalysis]
+    suggested_target: Optional[str] = None
+    suggested_task_type: Optional[TaskType] = None
+    target_candidates: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class AutopilotRequest(BaseModel):
+    dataset_id: int
+    target: Optional[str] = None
+    preset: str = Field(default="balanced", pattern="^(quick|balanced|thorough)$")
+    auto_deploy: bool = False
+    deploy_slug: Optional[str] = Field(default=None, max_length=64)
+
+
+class AutopilotResponse(BaseModel):
+    job: JobOut
+    best_model: Optional[ModelOut] = None
+    deployment_slug: Optional[str] = None
+    deployment_endpoint: Optional[str] = None
+    deployment_api_key: Optional[str] = None
+    chose_target: str
+    chose_task_type: TaskType
+    chose_algorithms: Optional[List[str]] = None
+    chose_trials: int
+    warnings: List[str] = Field(default_factory=list)

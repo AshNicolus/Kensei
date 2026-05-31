@@ -22,6 +22,9 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
 )
 
-if settings.CELERY_EAGER:
+_eager = settings.CELERY_EAGER or settings.ENV in {"development", "dev", "test"}
+if _eager:
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_eager_propagates = True
+    celery_app.conf.broker_url = "memory://"
+    celery_app.conf.result_backend = "cache+memory://"
