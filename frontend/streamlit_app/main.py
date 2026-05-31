@@ -110,7 +110,11 @@ def _render_analysis(analysis: Dict[str, Any]) -> None:
 
     df = pd.DataFrame(analysis["columns"])
     if not df.empty:
-        df = df[["name", "dtype", "unique", "missing", "missing_pct", "id_like", "constant", "sample_values"]]
+        df = df[["name", "dtype", "unique", "missing", "missing_pct", "id_like", "constant", "sample_values"]].copy()
+        df["sample_values"] = df["sample_values"].apply(
+            lambda xs: ", ".join(str(x) for x in xs) if isinstance(xs, list) else str(xs)
+        )
+        df["missing_pct"] = (df["missing_pct"] * 100).round(1).astype(str) + "%"
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 
