@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-in-prod"
     API_KEY_HEADER: str = "X-API-Key"
 
+    # If non-empty, overrides the dev CORS origin list. Comma-separated env var.
+    CORS_ORIGINS: List[str] = Field(default_factory=list)
+
     def ensure_dirs(self) -> None:
         for p in (self.DATA_DIR, self.UPLOADS_DIR, self.MODELS_DIR, self.ARTIFACTS_DIR):
             p.mkdir(parents=True, exist_ok=True)
