@@ -86,6 +86,7 @@ def train_job(self, job_id: int) -> Dict[str, Any]:
                 params=fitted.params,
                 artifact_path=str(artifact.model_path),
                 feature_names=fitted.feature_names,
+                feature_importance=fitted.feature_importance,
                 mlflow_run_id=run_id,
             )
             if fitted.algorithm == result.best.algorithm and best_model_id is None:

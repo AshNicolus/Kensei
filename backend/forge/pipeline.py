@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import tempfile
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import optuna
+from sklearn.inspection import permutation_importance
 from sklearn.model_selection import KFold, StratifiedKFold, cross_val_score, train_test_split
 from sklearn.pipeline import Pipeline as SkPipeline
 
@@ -34,6 +36,7 @@ class FittedModel:
     primary_metric: str
     primary_score: float
     feature_names: List[str]
+    feature_importance: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -70,6 +73,10 @@ def _tune_one(
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     scorer = _cv_scorer(task_type)
     splitter = _cv_splitter(task_type, cv_folds, seed)
+    # Per-trial cache directory for the fitted preprocessor — Optuna re-runs the
+    # same column transforms with different model hyperparameters, so caching
+    # them avoids redundant work and shaves a meaningful chunk of training time.
+    cache_dir = tempfile.mkdtemp(prefix="kensei_pre_cache_")
 
     def objective(trial: optuna.trial.Trial) -> float:
         params = algo.space(trial)
@@ -77,7 +84,10 @@ def _tune_one(
             est = algo.build(params)
         except Exception as e:
             raise optuna.TrialPruned(str(e))
-        pipe = SkPipeline([("pre", preprocessor), ("model", est)])
+        pipe = SkPipeline(
+            [("pre", preprocessor), ("model", est)],
+            memory=cache_dir,
+        )
         scores = cross_val_score(pipe, X, y, cv=splitter, scoring=scorer, n_jobs=1, error_score="raise")
         return float(np.mean(scores))
 
@@ -124,6 +134,7 @@ def _fit_final(
             np.asarray(y_test, dtype=float), np.asarray(y_pred, dtype=float)
         )
     primary = ev.primary_metric_for(task_type)
+    importances = _compute_feature_importance(pipe, X_test, y_test, feature_names, task_type)
     return FittedModel(
         algorithm=algo.name,
         task_type=task_type,
@@ -133,7 +144,49 @@ def _fit_final(
         primary_metric=primary,
         primary_score=float(metrics.get(primary, 0.0)),
         feature_names=feature_names,
+        feature_importance=importances,
     )
+
+
+def _compute_feature_importance(
+    pipe: SkPipeline,
+    X_test,
+    y_test,
+    feature_names: List[str],
+    task_type: TaskType,
+    max_repeats: int = 5,
+    max_samples: int = 200,
+) -> List[Dict[str, Any]]:
+    """Compute permutation importance over the raw input columns.
+
+    Works for every model in our catalog (logreg, RF, GB, XGB, LGBM, ridge)
+    because permutation_importance is model-agnostic. We cap repeats + sample
+    size to keep this fast — Optuna+CV already paid the heavy bill upstream.
+    """
+    if not feature_names:
+        return []
+    try:
+        scoring = "f1_macro" if task_type == TaskType.CLASSIFICATION else "r2"
+        sample_n = min(len(X_test), max_samples)
+        Xs = X_test.iloc[:sample_n] if hasattr(X_test, "iloc") else X_test[:sample_n]
+        ys = y_test.iloc[:sample_n] if hasattr(y_test, "iloc") else y_test[:sample_n]
+        result = permutation_importance(
+            pipe,
+            Xs,
+            ys,
+            scoring=scoring,
+            n_repeats=max_repeats,
+            random_state=0,
+            n_jobs=1,
+        )
+        rows = [
+            {"feature": name, "importance": float(score)}
+            for name, score in zip(feature_names, result.importances_mean.tolist())
+        ]
+        rows.sort(key=lambda r: r["importance"], reverse=True)
+        return rows
+    except Exception:
+        return []
 
 
 def smart_defaults(rows: int, cols: int, task_type: TaskType) -> dict:

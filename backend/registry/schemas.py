@@ -6,6 +6,12 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+# Pydantic protects names starting with "model_" by default. Several of our
+# resources legitimately use model_id/model_slug — we opt out of that namespace
+# protection here.
+_NO_PROTECTED = ConfigDict(protected_namespaces=())
+_NO_PROTECTED_FROM_ATTR = ConfigDict(from_attributes=True, protected_namespaces=())
+
 
 class TaskType(str, Enum):
     CLASSIFICATION = "classification"
@@ -52,7 +58,7 @@ class TrainRequest(BaseModel):
 
 
 class JobOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = _NO_PROTECTED_FROM_ATTR
 
     id: int
     dataset_id: int
@@ -67,8 +73,13 @@ class JobOut(BaseModel):
     created_at: datetime
 
 
+class FeatureImportance(BaseModel):
+    feature: str
+    importance: float
+
+
 class ModelOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = _NO_PROTECTED_FROM_ATTR
 
     id: int
     job_id: int
@@ -80,11 +91,12 @@ class ModelOut(BaseModel):
     params: Dict[str, Any] = Field(default_factory=dict)
     artifact_path: str
     feature_names: List[str] = Field(default_factory=list)
+    feature_importance: List[FeatureImportance] = Field(default_factory=list)
     created_at: datetime
 
 
 class DeploymentOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = _NO_PROTECTED_FROM_ATTR
 
     id: int
     model_id: int
@@ -96,6 +108,8 @@ class DeploymentOut(BaseModel):
 
 
 class DeployRequest(BaseModel):
+    model_config = _NO_PROTECTED
+
     model_id: int
     slug: Optional[str] = Field(default=None, max_length=64)
 
@@ -105,6 +119,8 @@ class PredictRequest(BaseModel):
 
 
 class PredictResponse(BaseModel):
+    model_config = _NO_PROTECTED
+
     predictions: List[Any]
     probabilities: Optional[List[List[float]]] = None
     model_id: int
@@ -177,6 +193,8 @@ class AutopilotRequest(BaseModel):
 
 
 class AutopilotResponse(BaseModel):
+    model_config = _NO_PROTECTED
+
     job: JobOut
     best_model: Optional[ModelOut] = None
     deployment_slug: Optional[str] = None

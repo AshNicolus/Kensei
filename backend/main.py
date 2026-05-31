@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.deps import init_db
 from backend.api.routers import auth, autopilot, deploy, jobs, predict, upload
+from backend.api.routers.predict import warmup_deployments
 from backend.core.config import settings
 from backend.core.logger import logger
 from backend.registry.schemas import HealthResponse
@@ -16,6 +17,10 @@ from backend.registry.schemas import HealthResponse
 async def lifespan(app: FastAPI):
     logger.info(f"starting {settings.APP_NAME} {settings.APP_VERSION} env={settings.ENV}")
     init_db()
+    try:
+        warmup_deployments()
+    except Exception as e:
+        logger.warning(f"warmup skipped: {e}")
     yield
     logger.info("shutting down")
 

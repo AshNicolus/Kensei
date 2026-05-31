@@ -182,6 +182,7 @@ def create_model(
     params: Dict[str, Any],
     artifact_path: str,
     feature_names: List[str],
+    feature_importance: Optional[List[Dict[str, Any]]] = None,
     mlflow_run_id: Optional[str] = None,
 ) -> Model:
     m = Model(
@@ -195,6 +196,7 @@ def create_model(
         params=params,
         artifact_path=artifact_path,
         feature_names=feature_names,
+        feature_importance=feature_importance or [],
         mlflow_run_id=mlflow_run_id,
     )
     db.add(m)
@@ -260,6 +262,15 @@ def get_deployment_by_slug(db: Session, slug: str) -> Optional[Deployment]:
     return db.execute(
         select(Deployment).where(Deployment.slug == slug)
     ).scalar_one_or_none()
+
+
+def list_active_deployments(db: Session) -> List[Deployment]:
+    """All active deployments across users — used for warmup, not user-facing."""
+    return list(
+        db.execute(
+            select(Deployment).where(Deployment.status == "active")
+        ).scalars().all()
+    )
 
 
 def list_deployments(db: Session, *, owner_id: int, limit: int = 100) -> List[Deployment]:

@@ -15,6 +15,7 @@ from backend.core.security import (
     hash_password,
     verify_password,
 )
+from backend.forge.samples import seed_samples_for_user
 from backend.registry.schemas import LoginRequest, Token, UserCreate, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -38,6 +39,10 @@ def register(payload: UserCreate, db: Session = Depends(get_db)) -> UserOut:
         full_name=payload.full_name,
     )
     logger.info(f"auth: registered user id={user.id} email={user.email}")
+    try:
+        seed_samples_for_user(db, user)
+    except Exception as e:
+        logger.warning(f"auth: sample seeding failed for user {user.id}: {e}")
     return UserOut.model_validate(user)
 
 

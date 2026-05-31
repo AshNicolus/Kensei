@@ -106,6 +106,7 @@ class Model(Base):
     params: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict)
     artifact_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     feature_names: Mapped[List[str]] = mapped_column(JSON, default=list)
+    feature_importance: Mapped[List[Dict[str, Any]]] = mapped_column(JSON, default=list)
     mlflow_run_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
