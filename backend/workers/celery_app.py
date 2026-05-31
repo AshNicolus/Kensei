@@ -21,3 +21,7 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
 )
+
+if settings.CELERY_EAGER:
+    celery_app.conf.task_always_eager = True
+    celery_app.conf.task_eager_propagates = True

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    CELERY_EAGER: bool = False
 
     MLFLOW_TRACKING_URI: str = "file:./data/mlruns"
     MLFLOW_EXPERIMENT: str = "kensei"
