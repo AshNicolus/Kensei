@@ -6,12 +6,43 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from backend.api.models import Dataset, Deployment, Job, Model
+from backend.api.models import Dataset, Deployment, Job, Model, User
+
+
+def create_user(
+    db: Session,
+    *,
+    email: str,
+    hashed_password: str,
+    full_name: Optional[str] = None,
+    is_admin: bool = False,
+) -> User:
+    u = User(
+        email=email.lower().strip(),
+        hashed_password=hashed_password,
+        full_name=full_name,
+        is_admin=is_admin,
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+def get_user(db: Session, user_id: int) -> Optional[User]:
+    return db.get(User, user_id)
+
+
+def get_user_by_email(db: Session, email: str) -> Optional[User]:
+    return db.execute(
+        select(User).where(User.email == email.lower().strip())
+    ).scalar_one_or_none()
 
 
 def create_dataset(
     db: Session,
     *,
+    owner_id: int,
     name: str,
     filename: str,
     path: str,
@@ -21,6 +52,7 @@ def create_dataset(
     target_candidates: List[str],
 ) -> Dataset:
     ds = Dataset(
+        owner_id=owner_id,
         name=name,
         filename=filename,
         path=path,
@@ -35,13 +67,23 @@ def create_dataset(
     return ds
 
 
-def get_dataset(db: Session, dataset_id: int) -> Optional[Dataset]:
-    return db.get(Dataset, dataset_id)
+def get_dataset(db: Session, dataset_id: int, owner_id: Optional[int] = None) -> Optional[Dataset]:
+    ds = db.get(Dataset, dataset_id)
+    if ds is None:
+        return None
+    if owner_id is not None and ds.owner_id != owner_id:
+        return None
+    return ds
 
 
-def list_datasets(db: Session, limit: int = 100) -> List[Dataset]:
+def list_datasets(db: Session, *, owner_id: int, limit: int = 100) -> List[Dataset]:
     return list(
-        db.execute(select(Dataset).order_by(desc(Dataset.created_at)).limit(limit))
+        db.execute(
+            select(Dataset)
+            .where(Dataset.owner_id == owner_id)
+            .order_by(desc(Dataset.created_at))
+            .limit(limit)
+        )
         .scalars()
         .all()
     )
@@ -50,12 +92,14 @@ def list_datasets(db: Session, limit: int = 100) -> List[Dataset]:
 def create_job(
     db: Session,
     *,
+    owner_id: int,
     dataset_id: int,
     target: str,
     task_type: str,
     config: Dict[str, Any],
 ) -> Job:
     job = Job(
+        owner_id=owner_id,
         dataset_id=dataset_id,
         target=target,
         task_type=task_type,
@@ -69,13 +113,23 @@ def create_job(
     return job
 
 
-def get_job(db: Session, job_id: int) -> Optional[Job]:
-    return db.get(Job, job_id)
+def get_job(db: Session, job_id: int, owner_id: Optional[int] = None) -> Optional[Job]:
+    job = db.get(Job, job_id)
+    if job is None:
+        return None
+    if owner_id is not None and job.owner_id != owner_id:
+        return None
+    return job
 
 
-def list_jobs(db: Session, limit: int = 100) -> List[Job]:
+def list_jobs(db: Session, *, owner_id: int, limit: int = 100) -> List[Job]:
     return list(
-        db.execute(select(Job).order_by(desc(Job.created_at)).limit(limit))
+        db.execute(
+            select(Job)
+            .where(Job.owner_id == owner_id)
+            .order_by(desc(Job.created_at))
+            .limit(limit)
+        )
         .scalars()
         .all()
     )
@@ -118,6 +172,7 @@ def update_job_status(
 def create_model(
     db: Session,
     *,
+    owner_id: int,
     job_id: int,
     algorithm: str,
     task_type: str,
@@ -130,6 +185,7 @@ def create_model(
     mlflow_run_id: Optional[str] = None,
 ) -> Model:
     m = Model(
+        owner_id=owner_id,
         job_id=job_id,
         algorithm=algorithm,
         task_type=task_type,
@@ -147,30 +203,36 @@ def create_model(
     return m
 
 
-def get_model(db: Session, model_id: int) -> Optional[Model]:
-    return db.get(Model, model_id)
+def get_model(db: Session, model_id: int, owner_id: Optional[int] = None) -> Optional[Model]:
+    m = db.get(Model, model_id)
+    if m is None:
+        return None
+    if owner_id is not None and m.owner_id != owner_id:
+        return None
+    return m
 
 
-def list_models_for_job(db: Session, job_id: int) -> List[Model]:
-    return list(
-        db.execute(
-            select(Model)
-            .where(Model.job_id == job_id)
-            .order_by(desc(Model.primary_score))
-        )
-        .scalars()
-        .all()
-    )
+def list_models_for_job(
+    db: Session, job_id: int, owner_id: Optional[int] = None
+) -> List[Model]:
+    stmt = select(Model).where(Model.job_id == job_id)
+    if owner_id is not None:
+        stmt = stmt.where(Model.owner_id == owner_id)
+    stmt = stmt.order_by(desc(Model.primary_score))
+    return list(db.execute(stmt).scalars().all())
 
 
-def best_model_for_job(db: Session, job_id: int) -> Optional[Model]:
-    models = list_models_for_job(db, job_id)
+def best_model_for_job(
+    db: Session, job_id: int, owner_id: Optional[int] = None
+) -> Optional[Model]:
+    models = list_models_for_job(db, job_id, owner_id=owner_id)
     return models[0] if models else None
 
 
 def create_deployment(
     db: Session,
     *,
+    owner_id: int,
     model_id: int,
     slug: str,
     endpoint: str,
@@ -179,6 +241,7 @@ def create_deployment(
     generated_code_path: Optional[str],
 ) -> Deployment:
     dep = Deployment(
+        owner_id=owner_id,
         model_id=model_id,
         slug=slug,
         status="active",
@@ -199,9 +262,14 @@ def get_deployment_by_slug(db: Session, slug: str) -> Optional[Deployment]:
     ).scalar_one_or_none()
 
 
-def list_deployments(db: Session, limit: int = 100) -> List[Deployment]:
+def list_deployments(db: Session, *, owner_id: int, limit: int = 100) -> List[Deployment]:
     return list(
-        db.execute(select(Deployment).order_by(desc(Deployment.created_at)).limit(limit))
+        db.execute(
+            select(Deployment)
+            .where(Deployment.owner_id == owner_id)
+            .order_by(desc(Deployment.created_at))
+            .limit(limit)
+        )
         .scalars()
         .all()
     )

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
@@ -10,7 +9,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from backend.api import crud
+from backend.api.auth import get_current_user
 from backend.api.deps import get_db
+from backend.api.models import User
 from backend.core.config import settings
 from backend.core.logger import logger
 from backend.forge.preprocess import load_dataframe, suggest_target_candidates
@@ -40,6 +41,7 @@ def _validate_extension(filename: str) -> None:
 async def upload_dataset(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> DatasetOut:
     if file.filename is None:
         raise HTTPException(status_code=400, detail="missing filename")
@@ -47,7 +49,7 @@ async def upload_dataset(
 
     safe_name = _safe_filename(file.filename)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    dest = settings.UPLOADS_DIR / f"{ts}_{safe_name}"
+    dest = settings.UPLOADS_DIR / f"u{user.id}_{ts}_{safe_name}"
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     size_bytes = 0
@@ -76,6 +78,7 @@ async def upload_dataset(
     candidates: List[str] = suggest_target_candidates(df)
     ds = crud.create_dataset(
         db,
+        owner_id=user.id,
         name=Path(safe_name).stem,
         filename=safe_name,
         path=str(dest),
@@ -84,26 +87,39 @@ async def upload_dataset(
         size_bytes=size_bytes,
         target_candidates=candidates,
     )
-    logger.info(f"upload: stored dataset id={ds.id} rows={ds.rows} cols={ds.columns}")
+    logger.info(
+        f"upload: stored dataset id={ds.id} owner={user.id} rows={ds.rows} cols={ds.columns}"
+    )
     return DatasetOut.model_validate(ds)
 
 
 @router.get("", response_model=List[DatasetOut])
-def list_uploaded(db: Session = Depends(get_db)) -> List[DatasetOut]:
-    return [DatasetOut.model_validate(d) for d in crud.list_datasets(db)]
+def list_uploaded(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> List[DatasetOut]:
+    return [DatasetOut.model_validate(d) for d in crud.list_datasets(db, owner_id=user.id)]
 
 
 @router.get("/{dataset_id}", response_model=DatasetOut)
-def get_dataset(dataset_id: int, db: Session = Depends(get_db)) -> DatasetOut:
-    ds = crud.get_dataset(db, dataset_id)
+def get_dataset(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DatasetOut:
+    ds = crud.get_dataset(db, dataset_id, owner_id=user.id)
     if ds is None:
         raise HTTPException(status_code=404, detail="dataset not found")
     return DatasetOut.model_validate(ds)
 
 
 @router.get("/{dataset_id}/columns")
-def dataset_columns(dataset_id: int, db: Session = Depends(get_db)) -> dict:
-    ds = crud.get_dataset(db, dataset_id)
+def dataset_columns(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    ds = crud.get_dataset(db, dataset_id, owner_id=user.id)
     if ds is None:
         raise HTTPException(status_code=404, detail="dataset not found")
     try:
