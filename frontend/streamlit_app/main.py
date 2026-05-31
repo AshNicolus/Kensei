@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import json
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import pandas as pd
 import streamlit as st
@@ -13,7 +13,66 @@ from frontend.streamlit_app import components as api
 st.set_page_config(page_title="Kensei", page_icon=":crossed_swords:", layout="wide")
 
 
-def _sidebar() -> str:
+def _token() -> Optional[str]:
+    return st.session_state.get("auth_token")
+
+
+def _logout() -> None:
+    for k in ("auth_token", "auth_email"):
+        st.session_state.pop(k, None)
+
+
+def _login_gate() -> bool:
+    if _token():
+        return True
+    st.title(":crossed_swords: Kensei")
+    st.caption("Sign in to use the AutoML platform.")
+
+    try:
+        api.health()
+    except Exception as e:
+        st.error(f"API unreachable: {e}")
+        return False
+
+    tab_login, tab_register = st.tabs(["Login", "Register"])
+
+    with tab_login:
+        with st.form("login_form"):
+            email = st.text_input("Email", key="login_email")
+            password = st.text_input("Password", type="password", key="login_password")
+            submit = st.form_submit_button("Login", type="primary")
+        if submit:
+            try:
+                tok = api.login(email.strip(), password)
+                st.session_state["auth_token"] = tok["access_token"]
+                st.session_state["auth_email"] = email.strip()
+                st.rerun()
+            except api.ApiError as e:
+                st.error(str(e))
+
+    with tab_register:
+        with st.form("register_form"):
+            email = st.text_input("Email", key="register_email")
+            name = st.text_input("Full name (optional)", key="register_name")
+            password = st.text_input(
+                "Password (8+ chars)", type="password", key="register_password"
+            )
+            submit = st.form_submit_button("Create account", type="primary")
+        if submit:
+            try:
+                api.register(email.strip(), password, full_name=name.strip() or None)
+                tok = api.login(email.strip(), password)
+                st.session_state["auth_token"] = tok["access_token"]
+                st.session_state["auth_email"] = email.strip()
+                st.success("Account created.")
+                st.rerun()
+            except api.ApiError as e:
+                st.error(str(e))
+
+    return False
+
+
+def _sidebar(token: str) -> str:
     st.sidebar.title(":crossed_swords: Kensei")
     st.sidebar.caption("AutoML — CSV to API")
     try:
@@ -21,6 +80,11 @@ def _sidebar() -> str:
         st.sidebar.success(f"API: {h.get('app')} v{h.get('version')}")
     except Exception as e:
         st.sidebar.error(f"API down: {e}")
+    email = st.session_state.get("auth_email", "?")
+    st.sidebar.markdown(f"**Signed in:** `{email}`")
+    if st.sidebar.button("Logout"):
+        _logout()
+        st.rerun()
     return st.sidebar.radio(
         "Navigate",
         ["Upload", "Train", "Jobs", "Deploy", "Predict"],
@@ -28,14 +92,14 @@ def _sidebar() -> str:
     )
 
 
-def _page_upload() -> None:
+def _page_upload(token: str) -> None:
     st.header("Upload dataset")
     file = st.file_uploader("CSV file", type=["csv"])
     if file is not None:
         if st.button("Upload", type="primary"):
             with st.spinner("Uploading..."):
                 try:
-                    res = api.upload_csv(file.name, file.getvalue())
+                    res = api.upload_csv(token, file.name, file.getvalue())
                     st.success(
                         f"Uploaded #{res['id']} — {res['rows']} rows × {res['columns']} cols"
                     )
@@ -43,17 +107,17 @@ def _page_upload() -> None:
                 except api.ApiError as e:
                     st.error(str(e))
 
-    st.subheader("Existing datasets")
-    ds = api.list_datasets()
+    st.subheader("Your datasets")
+    ds = api.list_datasets(token)
     if ds:
         st.dataframe(pd.DataFrame(ds), use_container_width=True)
     else:
         st.info("No datasets yet. Upload one above.")
 
 
-def _page_train() -> None:
+def _page_train(token: str) -> None:
     st.header("Train a model")
-    datasets = api.list_datasets()
+    datasets = api.list_datasets(token)
     if not datasets:
         st.info("Upload a dataset first.")
         return
@@ -62,7 +126,7 @@ def _page_train() -> None:
     label = st.selectbox("Dataset", list(options.keys()))
     ds = options[label]
 
-    cols_info = api.dataset_columns(ds["id"])
+    cols_info = api.dataset_columns(token, ds["id"])
     target_candidates = cols_info.get("target_candidates") or cols_info["columns"]
     target = st.selectbox(
         "Target column",
@@ -78,12 +142,16 @@ def _page_train() -> None:
     with c3:
         test_size = st.slider("Test size", 0.1, 0.5, 0.2, step=0.05)
 
-    task_type = st.selectbox("Task type (auto-detect if blank)", ["auto", "classification", "regression"])
+    task_type = st.selectbox(
+        "Task type (auto-detect if blank)", ["auto", "classification", "regression"]
+    )
     algos_input = st.text_input(
         "Algorithms (comma-separated, blank = all)",
         placeholder="logreg, random_forest, xgboost",
     )
-    time_limit = st.number_input("Time limit (sec, 0 = none)", min_value=0, max_value=3600, value=0, step=30)
+    time_limit = st.number_input(
+        "Time limit (sec, 0 = none)", min_value=0, max_value=3600, value=0, step=30
+    )
 
     if st.button("Launch training", type="primary"):
         payload: Dict[str, Any] = {
@@ -101,7 +169,7 @@ def _page_train() -> None:
         if time_limit > 0:
             payload["time_limit_seconds"] = int(time_limit)
         try:
-            job = api.create_job(payload)
+            job = api.create_job(token, payload)
             st.success(f"Job #{job['id']} created — {job['status']}")
             st.session_state["last_job_id"] = job["id"]
             st.json(job)
@@ -109,9 +177,9 @@ def _page_train() -> None:
             st.error(str(e))
 
 
-def _page_jobs() -> None:
+def _page_jobs(token: str) -> None:
     st.header("Jobs")
-    jobs = api.list_jobs()
+    jobs = api.list_jobs(token)
     if not jobs:
         st.info("No jobs yet.")
         return
@@ -125,7 +193,7 @@ def _page_jobs() -> None:
         slot = st.empty()
         bar = st.progress(0.0)
         while True:
-            j = api.get_job(int(job_id))
+            j = api.get_job(token, int(job_id))
             slot.markdown(
                 f"**Job #{j['id']}** {api.status_badge(j['status'])} — {j.get('message') or ''}"
             )
@@ -136,10 +204,10 @@ def _page_jobs() -> None:
         st.success("Done.")
 
     try:
-        j = api.get_job(int(job_id))
+        j = api.get_job(token, int(job_id))
         st.subheader(f"Job #{j['id']} — {api.status_badge(j['status'])}")
         st.json(j)
-        models = api.list_models(int(job_id))
+        models = api.list_models(token, int(job_id))
         if models:
             st.subheader("Candidates")
             st.dataframe(pd.DataFrame(models), use_container_width=True)
@@ -147,16 +215,16 @@ def _page_jobs() -> None:
         st.error(str(e))
 
 
-def _page_deploy() -> None:
+def _page_deploy(token: str) -> None:
     st.header("Deploy a model")
-    jobs = [j for j in api.list_jobs() if j["status"] == "succeeded"]
+    jobs = [j for j in api.list_jobs(token) if j["status"] == "succeeded"]
     if not jobs:
         st.info("Need at least one succeeded job.")
         return
     job_label = {f"Job #{j['id']} — {j['target']}": j for j in jobs}
     selected = st.selectbox("Job", list(job_label.keys()))
     job = job_label[selected]
-    models = api.list_models(job["id"])
+    models = api.list_models(token, job["id"])
     if not models:
         st.warning("No candidate models on this job.")
         return
@@ -167,22 +235,22 @@ def _page_deploy() -> None:
 
     if st.button("Deploy", type="primary"):
         try:
-            res = api.deploy(model["id"], slug or None)
+            res = api.deploy(token, model["id"], slug or None)
             st.success(f"Deployed at {res['deployment']['endpoint']}")
             st.warning(f"API key (shown once): `{res['api_key']}`")
             st.json(res)
         except api.ApiError as e:
             st.error(str(e))
 
-    st.subheader("Deployments")
-    deps = api.list_deployments()
+    st.subheader("Your deployments")
+    deps = api.list_deployments(token)
     if deps:
         st.dataframe(pd.DataFrame(deps), use_container_width=True)
 
 
-def _page_predict() -> None:
+def _page_predict(token: str) -> None:
     st.header("Predict")
-    deps = api.list_deployments()
+    deps = api.list_deployments(token)
     if not deps:
         st.info("No deployments yet.")
         return
@@ -220,17 +288,21 @@ def _page_predict() -> None:
 
 
 def main() -> None:
-    page = _sidebar()
+    if not _login_gate():
+        return
+    token = _token()
+    assert token is not None
+    page = _sidebar(token)
     if page == "Upload":
-        _page_upload()
+        _page_upload(token)
     elif page == "Train":
-        _page_train()
+        _page_train(token)
     elif page == "Jobs":
-        _page_jobs()
+        _page_jobs(token)
     elif page == "Deploy":
-        _page_deploy()
+        _page_deploy(token)
     elif page == "Predict":
-        _page_predict()
+        _page_predict(token)
 
 
 if __name__ == "__main__":

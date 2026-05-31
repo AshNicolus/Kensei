@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.deps import init_db
-from backend.api.routers import deploy, jobs, predict, upload
+from backend.api.routers import auth, deploy, jobs, predict, upload
 from backend.core.config import settings
 from backend.core.logger import logger
 from backend.registry.schemas import HealthResponse
@@ -41,6 +41,7 @@ def health() -> HealthResponse:
     return HealthResponse(app=settings.APP_NAME, version=settings.APP_VERSION)
 
 
+app.include_router(auth.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(deploy.router, prefix="/api")

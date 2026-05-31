@@ -76,6 +76,7 @@ def train_job(self, job_id: int) -> Dict[str, Any]:
             artifact = registry_manager.save_artifact(job_id, fitted, mlflow_run_id=run_id)
             m = crud.create_model(
                 db,
+                owner_id=job.owner_id,
                 job_id=job_id,
                 algorithm=fitted.algorithm,
                 task_type=fitted.task_type.value,

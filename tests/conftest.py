@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+import secrets
 import tempfile
 from pathlib import Path
-from typing import Iterator
+from typing import Dict, Iterator, Tuple
 
 import pytest
 
@@ -13,6 +14,7 @@ os.environ["ENV"] = "test"
 os.environ["MLFLOW_TRACKING_URI"] = f"file:{(_TEST_DIR / 'mlruns').as_posix()}"
 os.environ["CELERY_BROKER_URL"] = "memory://"
 os.environ["CELERY_RESULT_BACKEND"] = "cache+memory://"
+os.environ["SECRET_KEY"] = "test-secret-do-not-use-in-prod"
 
 from backend.core.config import settings  # noqa: E402
 
@@ -83,3 +85,38 @@ def client() -> Iterator:
 
     with TestClient(app) as c:
         yield c
+
+
+def _unique_email() -> str:
+    return f"u_{secrets.token_hex(6)}@example.com"
+
+
+def register_and_login(client, email: str | None = None, password: str = "pw-secret-123") -> Tuple[str, Dict[str, str], str]:
+    """Register a fresh user, login, return (email, auth_headers, password)."""
+    em = email or _unique_email()
+    r = client.post(
+        "/api/auth/register",
+        json={"email": em, "password": password, "full_name": "T User"},
+    )
+    assert r.status_code == 201, r.text
+    r = client.post("/api/auth/login", json={"email": em, "password": password})
+    assert r.status_code == 200, r.text
+    token = r.json()["access_token"]
+    return em, {"Authorization": f"Bearer {token}"}, password
+
+
+@pytest.fixture()
+def auth_user(client) -> Tuple[str, Dict[str, str]]:
+    email, headers, _ = register_and_login(client)
+    return email, headers
+
+
+@pytest.fixture()
+def auth_headers(auth_user) -> Dict[str, str]:
+    return auth_user[1]
+
+
+@pytest.fixture()
+def second_user(client) -> Tuple[str, Dict[str, str]]:
+    email, headers, _ = register_and_login(client)
+    return email, headers

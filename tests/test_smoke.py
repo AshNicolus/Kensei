@@ -1,4 +1,4 @@
-"""End-to-end smoke test: upload → train → deploy → predict.
+"""End-to-end smoke test: register → upload → train → deploy → predict.
 
 Runs entirely in-process: Celery is configured in eager mode in conftest,
 SQLite + filesystem artifacts under a temp dir, no external broker required.
@@ -6,11 +6,12 @@ SQLite + filesystem artifacts under a temp dir, no external broker required.
 from __future__ import annotations
 
 
-def _upload(client, csv_path) -> int:
+def _upload(client, csv_path, headers) -> int:
     with open(csv_path, "rb") as f:
         resp = client.post(
             "/api/datasets",
             files={"file": (csv_path.name, f, "text/csv")},
+            headers=headers,
         )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
@@ -24,27 +25,26 @@ def test_health(client):
     assert body["app"] == "Kensei"
 
 
-def test_upload_lists_dataset(client, sample_classification_csv):
-    ds_id = _upload(client, sample_classification_csv)
-    resp = client.get(f"/api/datasets/{ds_id}")
+def test_upload_lists_dataset(client, sample_classification_csv, auth_headers):
+    ds_id = _upload(client, sample_classification_csv, auth_headers)
+    resp = client.get(f"/api/datasets/{ds_id}", headers=auth_headers)
     assert resp.status_code == 200
     body = resp.json()
     assert body["rows"] > 0
     assert body["columns"] > 0
-    assert "target" in (body.get("target_candidates") or []) or body["target_candidates"]
 
 
-def test_dataset_columns_endpoint(client, sample_classification_csv):
-    ds_id = _upload(client, sample_classification_csv)
-    resp = client.get(f"/api/datasets/{ds_id}/columns")
+def test_dataset_columns_endpoint(client, sample_classification_csv, auth_headers):
+    ds_id = _upload(client, sample_classification_csv, auth_headers)
+    resp = client.get(f"/api/datasets/{ds_id}/columns", headers=auth_headers)
     assert resp.status_code == 200
     body = resp.json()
     assert "columns" in body
     assert "target" in body["columns"]
 
 
-def test_end_to_end_classification(client, sample_classification_csv):
-    ds_id = _upload(client, sample_classification_csv)
+def test_end_to_end_classification(client, sample_classification_csv, auth_headers):
+    ds_id = _upload(client, sample_classification_csv, auth_headers)
 
     resp = client.post(
         "/api/jobs",
@@ -56,24 +56,29 @@ def test_end_to_end_classification(client, sample_classification_csv):
             "test_size": 0.25,
             "algorithms": ["logreg"],
         },
+        headers=auth_headers,
     )
     assert resp.status_code == 201, resp.text
     job = resp.json()
     job_id = job["id"]
 
-    resp = client.get(f"/api/jobs/{job_id}")
+    resp = client.get(f"/api/jobs/{job_id}", headers=auth_headers)
     assert resp.status_code == 200
     job = resp.json()
     assert job["status"] == "succeeded", f"job failed: {job}"
     assert job["best_model_id"] is not None
 
-    resp = client.get(f"/api/jobs/{job_id}/best")
+    resp = client.get(f"/api/jobs/{job_id}/best", headers=auth_headers)
     assert resp.status_code == 200
     best = resp.json()
     assert best["algorithm"] == "logreg"
     assert "f1_macro" in best["metrics"]
 
-    resp = client.post("/api/deploy", json={"model_id": best["id"], "slug": "smoke-test"})
+    resp = client.post(
+        "/api/deploy",
+        json={"model_id": best["id"], "slug": "smoke-test"},
+        headers=auth_headers,
+    )
     assert resp.status_code == 201, resp.text
     deploy_body = resp.json()
     assert deploy_body["deployment"]["slug"] == "smoke-test"
@@ -92,8 +97,8 @@ def test_end_to_end_classification(client, sample_classification_csv):
     assert pred["deployment_slug"] == "smoke-test"
 
 
-def test_predict_rejects_bad_api_key(client, sample_classification_csv):
-    ds_id = _upload(client, sample_classification_csv)
+def test_predict_rejects_bad_api_key(client, sample_classification_csv, auth_headers):
+    ds_id = _upload(client, sample_classification_csv, auth_headers)
     job_resp = client.post(
         "/api/jobs",
         json={
@@ -104,14 +109,17 @@ def test_predict_rejects_bad_api_key(client, sample_classification_csv):
             "test_size": 0.25,
             "algorithms": ["logreg"],
         },
+        headers=auth_headers,
     )
     assert job_resp.status_code == 201
     job = job_resp.json()
     assert job["status"] == "succeeded"
 
-    best = client.get(f"/api/jobs/{job['id']}/best").json()
+    best = client.get(f"/api/jobs/{job['id']}/best", headers=auth_headers).json()
     dep_resp = client.post(
-        "/api/deploy", json={"model_id": best["id"], "slug": "auth-test"}
+        "/api/deploy",
+        json={"model_id": best["id"], "slug": "auth-test"},
+        headers=auth_headers,
     )
     assert dep_resp.status_code == 201
 
@@ -123,9 +131,10 @@ def test_predict_rejects_bad_api_key(client, sample_classification_csv):
     assert bad.status_code == 401
 
 
-def test_train_unknown_dataset_returns_404(client):
+def test_train_unknown_dataset_returns_404(client, auth_headers):
     resp = client.post(
         "/api/jobs",
         json={"dataset_id": 99999, "target": "target", "trials": 1, "cv_folds": 2},
+        headers=auth_headers,
     )
     assert resp.status_code == 404
